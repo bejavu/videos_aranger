@@ -7,7 +7,8 @@ var async = require('async')
 var optionDefinitions = [
   { name: 'excel_filename', alias: 'f', type: String },
   { name: 'input_folder', alias: 'i', type: String },
-  { name: 'output_folder', alias: 'o', type: String }
+  { name: 'output_folder', alias: 'o', type: String },
+  { name: 'file_ending', alias: 'e', type: String }
 ]
 
 var options = commandLineArgs(optionDefinitions)
@@ -26,16 +27,35 @@ var create_folder = function (folder_name, callback) {
   mkdirp(folder_name, callback)
 }
 
-var copy_file = function (from, to) {
-  console.log('copying', from, 'to', to)
-  fs.createReadStream(from).pipe(fs.createWriteStream(to))
-  console.log('done copying', from, 'to', to)
+function copy_file(source, target, cb) {
+  var cbCalled = false
+
+  var rd = fs.createReadStream(source)
+  rd.on("error", function(err) {
+    done(err)
+  })
+  var wr = fs.createWriteStream(target)
+  wr.on("error", function(err) {
+    done(err)
+  })
+  wr.on("close", function(ex) {
+    done()
+  })
+  rd.pipe(wr)
+
+  function done(err) {
+    if (!cbCalled) {
+      cb(err)
+      cbCalled = true
+    }
+  }
 }
 
 var move_files = function (options, callback) {
   var input_folder = options.input_folder || '.'
   var output_folder = options.output_folder || '.'
   var excel_filename = options.excel_filename
+  var file_ending = options.file_ending || 'mp4'
   if (!excel_filename) throw new Error('file not found')
   var workSheets = read_excel(options.excel_filename)
   console.log('excel data: ', JSON.stringify(workSheets))
@@ -49,10 +69,17 @@ var move_files = function (options, callback) {
     var out_folder = output_folder + '/' + name + '_' + date + '_' + sign
     create_folder(out_folder, function (err) {
       if (err) return cb(err)
-      copy_file(input_folder + '/names/' + name + '.txt', out_folder + '/' + name + '.txt')
-      copy_file(input_folder + '/dates/' + date + '.txt', out_folder + '/' + date + '.txt')
-      copy_file(input_folder + '/signs/' + sign + '.txt', out_folder + '/' + sign + '.txt')
-      cb()
+      async.waterfall([
+        function (cb) {
+          copy_file(input_folder + '/names/' + name + '.' + file_ending, out_folder + '/' + name + '.' + file_ending, cb)
+        },
+        function (cb) {
+          copy_file(input_folder + '/dates/' + date + '.' + file_ending, out_folder + '/' + date + '.' + file_ending, cb)
+        },
+        function (cb) {
+          copy_file(input_folder + '/signs/' + sign + '.' + file_ending, out_folder + '/' + sign + '.' + file_ending, cb)
+        }
+      ], cb)
     })
   }, callback)
 }
